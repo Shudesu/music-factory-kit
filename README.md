@@ -25,6 +25,9 @@ bash /workspace/provision.sh
 初回はモデル約20GBを自動ダウンロードします（5〜10分）。
 完了後、Pod の 8188 ポートで ComfyUI が開きます。
 
+キットが更新されたら、上の `curl` をもう一度実行して Volume 上の `provision.sh` を上書きしてください。
+生成物は `/workspace/outputs`（Volume）に保存されます。`/root/ComfyUI/output` はそこへのリンクです。
+
 ### check_fingerprint.py
 ```bash
 # 手元のPC（要: pip install なし / fpcalc のみ必要）
