@@ -28,12 +28,70 @@ link_to_volume() {
   ln -s "$dst" "$src" && [ "$(readlink -f "$src")" = "$(readlink -f "$dst")" ]
 }
 
+# ACE-Step 1.5 のモデル（Comfy-Org 公式配布）。1行に「HF 上のパス サイズ(バイト)」。
+# 置き場所は先頭の split_files/ を外したパス（例: split_files/vae/x → /workspace/models/vae/x）。
+# 第4章・第10章の構成: AIO turbo（試し曲・LoRA）/ XL SFT（配信用）/ LM 0.6B + 1.7B（4B は使わない）/ VAE。
+# サイズは MODEL_BASE のコミット時点で HF API から確認した値。変えるときは両方そろえて更新する。
+ACE_MODELS='
+checkpoints/ace_step_1.5_turbo_aio.safetensors 10025478736
+split_files/diffusion_models/acestep_v1.5_xl_sft_bf16.safetensors 9974719930
+split_files/text_encoders/qwen_0.6b_ace15.safetensors 1191588248
+split_files/text_encoders/qwen_1.7b_ace15.safetensors 3708523360
+split_files/vae/ace_1.5_vae.safetensors 337431732
+'
+MODEL_BASE=${MFK_MODEL_BASE:-https://huggingface.co/Comfy-Org/ACE-Step-1.5/resolve/6707deb277e9e0907fd9c14ce6b6f1d695c6a3fc}
+
+fsize() { stat -c %s "$1" 2>/dev/null || stat -f %z "$1" 2>/dev/null; }
+
+# URL $1 のファイルを、サイズ $3 バイトとして $2 に置く。既に同じサイズで揃っていれば何もしない。
+# 隣の $2.part に書いてサイズが合ってから mv するので、途中で切れても中途半端なモデルは置かれず、
+# 次の試行（provision.sh の再実行でも）は .part の続きから再開する。揃わなければ失敗を返す。
+download_model() {
+  local url=$1 dst=$2 size=$3 part=$2.part have try rc progress=(-sS)
+  [ "$(fsize "$dst")" = "$size" ] && return 0
+  [ -t 2 ] && progress=(--progress-bar)
+  mkdir -p "${dst%/*}" || return 1
+  for try in 1 2 3 4 5; do
+    have=$(fsize "$part"); have=${have:-0}
+    [ "$have" -gt "$size" ] && { rm -f "$part"; have=0; }  # 想定より大きい .part は壊れているので捨てる
+    if [ "$have" -lt "$size" ]; then
+      echo "  ${dst##*/}: $((have / 1000000)) / $((size / 1000000)) MB から取得（試行 ${try}）"
+      curl -fL --connect-timeout 20 --speed-limit 102400 --speed-time 60 -C - "${progress[@]}" -o "$part" "$url"; rc=$?
+      [ "$rc" -eq 33 ] && rm -f "$part"  # サーバーが続きからの取得に応じなかった → 次は最初から
+    fi
+    if [ "$(fsize "$part")" = "$size" ]; then
+      mv -f "$part" "$dst" && return 0
+      return 1
+    fi
+    [ "$try" -lt 5 ] && sleep "${MFK_RETRY_WAIT:-5}"
+  done
+  echo "  ${dst##*/}: $size バイトそろわず（今 $(fsize "$part") バイト。もう一度実行すると続きから再開）"
+  return 1
+}
+
+# ACE_MODELS のうち $2（モデル置き場）に無いものだけ、$1 を起点に取得する。揃っていれば stat だけで終わる。
+ensure_models() {
+  local base=$1 root=$2 path size need=0 n=0
+  while read -r path size <&3; do
+    [ -n "$path" ] || continue
+    [ "$(fsize "$root/${path#split_files/}")" = "$size" ] || { need=$((need + size)); n=$((n + 1)); }
+  done 3<<< "$ACE_MODELS"
+  [ "$n" -eq 0 ] && { echo "MODELS OK"; return 0; }
+  echo "MODELS: $n 個・約 $((need / 1000000000)).$((need / 100000000 % 10)) GB をダウンロードします（初回のみ。5〜10分）"
+  while read -r path size <&3; do
+    [ -n "$path" ] || continue
+    download_model "$base/$path" "$root/${path#split_files/}" "$size" || return 1
+  done 3<<< "$ACE_MODELS"
+  echo "MODELS OK"
+}
+
 [ -d /root/ComfyUI ] || git clone --depth 1 -q https://github.com/comfyanonymous/ComfyUI.git /root/ComfyUI
 cd /root/ComfyUI || { echo "COMFY FAILED: /root/ComfyUI がありません"; exit 1; }
 for d in diffusion_models vae text_encoders loras checkpoints; do
   link_to_volume models/$d /workspace/models/$d || { echo "LINK FAILED: models/$d"; exit 1; }
 done
 link_to_volume output /workspace/outputs || { echo "LINK FAILED: output（生成物がPodローカルに保存されるため中断）"; exit 1; }
+ensure_models "$MODEL_BASE" /workspace/models || { echo "MODEL DOWNLOAD FAILED（ComfyUI は起動しません。もう一度実行すると続きから再開します）"; exit 1; }
 pip install --break-system-packages --no-cache-dir -q -r requirements.txt numpy 2>&1 | tail -1
 
 # FL LoRA training node（comfy起動より前に入れる）

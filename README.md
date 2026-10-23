@@ -22,8 +22,17 @@ curl -sL https://raw.githubusercontent.com/Shudesu/music-factory-kit/main/provis
 bash /workspace/provision.sh
 ```
 
-初回はモデル約20GBを自動ダウンロードします（5〜10分）。
+初回はモデル約25GBを Volume の `/workspace/models/` に自動ダウンロードします（5〜10分）。
+2回目以降は揃っているか確認するだけです。途中で切れても、もう一度実行すれば続きから再開します。
 完了後、Pod の 8188 ポートで ComfyUI が開きます。
+
+| 置き場所（`/workspace/models/`） | 用途 | サイズ |
+|---|---|---|
+| `checkpoints/ace_step_1.5_turbo_aio.safetensors` | Turbo（AIO）: 試し曲・LoRA（第4・6・10章） | 10.0 GB |
+| `diffusion_models/acestep_v1.5_xl_sft_bf16.safetensors` | XL SFT: 配信用の高品質版（第4章） | 10.0 GB |
+| `text_encoders/qwen_0.6b_ace15.safetensors` | LM 0.6B | 1.2 GB |
+| `text_encoders/qwen_1.7b_ace15.safetensors` | LM 1.7B（4B は使わない） | 3.7 GB |
+| `vae/ace_1.5_vae.safetensors` | VAE | 0.3 GB |
 
 キットが更新されたら、上の `curl` をもう一度実行して Volume 上の `provision.sh` を上書きしてください。
 生成物は `/workspace/outputs`（Volume）に保存されます。`/root/ComfyUI/output` はそこへのリンクです。
@@ -51,4 +60,4 @@ bash master.sh input.flac output.mp3
 ## ライセンス
 
 MIT。ACE-Step 1.5 本体も MIT（商用利用可）。
-モデル配布元: https://huggingface.co/Comfy-Org/ace_step_1.5_ComfyUI_files
+モデル配布元: https://huggingface.co/Comfy-Org/ACE-Step-1.5（旧名 Comfy-Org/ace_step_1.5_ComfyUI_files）
